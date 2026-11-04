@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rick_morty_flutter_app/domain/character.dart';
 import 'package:rick_morty_flutter_app/domain/character_repository.dart';
@@ -8,7 +9,7 @@ import 'package:rick_morty_flutter_app/presentation/catalog_controller.dart';
 void main() {
   test('search debounces and ignores responses from older queries', () async {
     final repository = FakeRepository();
-    final controller = CatalogController(
+    final (container, controller) = await startController(
       repository,
       debounce: const Duration(milliseconds: 10),
     );
@@ -24,33 +25,33 @@ void main() {
     repository.complete(1, [character(1, 'Rick')]);
     repository.complete(0, [character(2, 'Old result')]);
     await Future<void>.delayed(Duration.zero);
-    expect(controller.state.query, 'morty');
-    expect(controller.state.isInitialLoading, isTrue);
-    expect(controller.state.characters, isEmpty);
+    expect(container.read(catalogProvider).query, 'morty');
+    expect(container.read(catalogProvider).isInitialLoading, isTrue);
+    expect(container.read(catalogProvider).characters, isEmpty);
 
     repository.complete(2, [character(3, 'Morty')]);
     await Future<void>.delayed(Duration.zero);
-    expect(controller.state.characters.single.name, 'Morty');
-    controller.dispose();
+    expect(container.read(catalogProvider).characters.single.name, 'Morty');
+    container.dispose();
   });
 
   test(
     'pagination requests each page once and retries a failed page',
     () async {
       final repository = FakeRepository();
-      final controller = CatalogController(repository);
+      final (container, controller) = await startController(repository);
       repository.complete(0, [character(1, 'Rick')], nextPage: 2);
       await Future<void>.delayed(Duration.zero);
 
       controller.loadNextPage();
       controller.loadNextPage();
       expect(repository.requests.map((r) => r.page), [1, 2]);
-      expect(controller.state.isPageLoading, isTrue);
+      expect(container.read(catalogProvider).isPageLoading, isTrue);
 
       repository.fail(1);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.state.hasError, isTrue);
-      expect(controller.state.characters.single.name, 'Rick');
+      expect(container.read(catalogProvider).hasError, isTrue);
+      expect(container.read(catalogProvider).characters.single.name, 'Rick');
       controller.loadNextPage();
       expect(repository.requests.length, 2);
 
@@ -58,36 +59,39 @@ void main() {
       expect(repository.requests.map((r) => r.page), [1, 2, 2]);
       repository.complete(2, [character(2, 'Morty')]);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.state.characters.map((c) => c.name), ['Rick', 'Morty']);
-      expect(controller.state.nextPage, isNull);
+      expect(container.read(catalogProvider).characters.map((c) => c.name), [
+        'Rick',
+        'Morty',
+      ]);
+      expect(container.read(catalogProvider).nextPage, isNull);
       controller.loadNextPage();
       expect(repository.requests.length, 3);
-      controller.dispose();
+      container.dispose();
     },
   );
 
   test('first-page failure can be retried', () async {
     final repository = FakeRepository();
-    final controller = CatalogController(repository);
-    expect(controller.state.isInitialLoading, isTrue);
+    final (container, controller) = await startController(repository);
+    expect(container.read(catalogProvider).isInitialLoading, isTrue);
     repository.fail(0);
     await Future<void>.delayed(Duration.zero);
-    expect(controller.state.hasError, isTrue);
-    expect(controller.state.isInitialLoading, isFalse);
+    expect(container.read(catalogProvider).hasError, isTrue);
+    expect(container.read(catalogProvider).isInitialLoading, isFalse);
 
     controller.retry();
-    expect(controller.state.isInitialLoading, isTrue);
+    expect(container.read(catalogProvider).isInitialLoading, isTrue);
     expect(repository.requests.map((r) => r.page), [1, 1]);
     repository.complete(1, [character(1, 'Rick')]);
     await Future<void>.delayed(Duration.zero);
-    expect(controller.state.characters.single.name, 'Rick');
-    expect(controller.state.hasError, isFalse);
-    controller.dispose();
+    expect(container.read(catalogProvider).characters.single.name, 'Rick');
+    expect(container.read(catalogProvider).hasError, isFalse);
+    container.dispose();
   });
 
   test('empty search result is distinct from a load error', () async {
     final repository = FakeRepository();
-    final controller = CatalogController(
+    final (container, controller) = await startController(
       repository,
       debounce: const Duration(milliseconds: 10),
     );
@@ -97,10 +101,25 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 25));
     repository.complete(1, []);
     await Future<void>.delayed(Duration.zero);
-    expect(controller.state.isEmpty, isTrue);
-    expect(controller.state.hasError, isFalse);
-    controller.dispose();
+    expect(container.read(catalogProvider).isEmpty, isTrue);
+    expect(container.read(catalogProvider).hasError, isFalse);
+    container.dispose();
   });
+}
+
+Future<(ProviderContainer, CatalogController)> startController(
+  CharacterRepository repository, {
+  Duration debounce = const Duration(milliseconds: 350),
+}) async {
+  final container = ProviderContainer(
+    overrides: [
+      characterRepositoryProvider.overrideWithValue(repository),
+      catalogProvider.overrideWith(() => CatalogController(debounce: debounce)),
+    ],
+  );
+  final controller = container.read(catalogProvider.notifier);
+  await Future<void>.delayed(Duration.zero);
+  return (container, controller);
 }
 
 Character character(int id, String name) => Character(

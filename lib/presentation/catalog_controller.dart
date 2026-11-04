@@ -2,16 +2,15 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/dio_character_repository.dart';
 import '../domain/character.dart';
 import '../domain/character_repository.dart';
 
 final characterRepositoryProvider = Provider<CharacterRepository>(
-  (ref) => DioCharacterRepository(),
+  (ref) => throw UnimplementedError('CharacterRepository must be provided'),
 );
 
-final catalogProvider = StateNotifierProvider<CatalogController, CatalogState>(
-  (ref) => CatalogController(ref.read(characterRepositoryProvider)),
+final catalogProvider = NotifierProvider<CatalogController, CatalogState>(
+  CatalogController.new,
 );
 
 class CatalogState {
@@ -51,18 +50,23 @@ class CatalogState {
   static const _unset = Object();
 }
 
-class CatalogController extends StateNotifier<CatalogState> {
-  CatalogController(
-    this._repository, {
-    this.debounce = const Duration(milliseconds: 350),
-  }) : super(const CatalogState()) {
-    unawaited(_fetch(page: 1, generation: _generation));
-  }
+class CatalogController extends Notifier<CatalogState> {
+  CatalogController({this.debounce = const Duration(milliseconds: 350)});
 
-  final CharacterRepository _repository;
+  late CharacterRepository _repository;
   final Duration debounce;
   Timer? _searchTimer;
   int _generation = 0;
+
+  @override
+  CatalogState build() {
+    _repository = ref.read(characterRepositoryProvider);
+    ref.onDispose(() => _searchTimer?.cancel());
+    scheduleMicrotask(() {
+      if (ref.mounted) unawaited(_fetch(page: 1, generation: _generation));
+    });
+    return const CatalogState();
+  }
 
   void setQuery(String value) {
     final query = value.trim();
@@ -106,7 +110,7 @@ class CatalogController extends StateNotifier<CatalogState> {
         page: page,
         name: state.query,
       );
-      if (!mounted || generation != _generation) return;
+      if (!ref.mounted || generation != _generation) return;
       state = state.copyWith(
         characters: page == 1
             ? result.characters
@@ -117,18 +121,12 @@ class CatalogController extends StateNotifier<CatalogState> {
         hasError: false,
       );
     } catch (_) {
-      if (!mounted || generation != _generation) return;
+      if (!ref.mounted || generation != _generation) return;
       state = state.copyWith(
         isInitialLoading: false,
         isPageLoading: false,
         hasError: true,
       );
     }
-  }
-
-  @override
-  void dispose() {
-    _searchTimer?.cancel();
-    super.dispose();
   }
 }

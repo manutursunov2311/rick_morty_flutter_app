@@ -1,12 +1,10 @@
 import 'package:dio/dio.dart';
 
-import '../app/app_config.dart';
 import '../domain/character.dart';
 import '../domain/character_repository.dart';
 
 class DioCharacterRepository implements CharacterRepository {
-  DioCharacterRepository([Dio? dio])
-    : _dio = dio ?? Dio(BaseOptions(baseUrl: AppConfig.apiBaseUrl));
+  DioCharacterRepository(this._dio);
 
   final Dio _dio;
 
